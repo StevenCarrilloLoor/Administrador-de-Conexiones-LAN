@@ -62,6 +62,29 @@ def _safe_print(msg: str) -> None:
         pass
 
 
+def ensure_std_streams() -> None:
+    """En el .exe windowed, sys.stdout/stderr son None. Varias librerias (uvicorn al
+    configurar su logging con dictConfig, que hace sys.stdout.isatty()) fallan con
+    'Unable to configure formatter default'. Apuntamos los streams a un archivo real
+    para evitar el crash y conservar la salida. [fix exe windowed]"""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    stream = None
+    try:
+        stream = open(apppaths.log_dir() / "console.log", "a", encoding="utf-8", buffering=1)
+    except Exception:
+        try:
+            import os
+            stream = open(os.devnull, "w")
+        except Exception:
+            stream = None
+    if stream is not None:
+        if sys.stdout is None:
+            sys.stdout = stream
+        if sys.stderr is None:
+            sys.stderr = stream
+
+
 def setup_launcher_logging() -> None:
     # Handler propio en el logger "lanmanager.launcher" (NO en el root "lanmanager"),
     # para que setup_logging() de la app no lo borre y launcher.log conserve la traza
@@ -287,6 +310,7 @@ def _selftest_inner() -> int:
 
 
 def main() -> int:
+    ensure_std_streams()   # imprescindible antes de uvicorn en el .exe windowed
     setup_launcher_logging()
     if "--selftest" in sys.argv:
         return selftest()

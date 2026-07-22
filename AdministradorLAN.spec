@@ -59,7 +59,10 @@ exe = EXE(
     strip=False,
     upx=False,
     runtime_tmpdir=None,
-    console=bool(TEST),
+    # Ambas variantes son windowed (console=False) para que la de prueba reproduzca
+    # fielmente el path del .exe real (sys.stdout/stderr = None). La diferencia es solo
+    # la elevacion: la de prueba NO pide UAC, para poder verificarla sin intervencion.
+    console=False,
     disable_windowed_traceback=False,
     uac_admin=(not TEST),
     icon="build_assets/app.ico",

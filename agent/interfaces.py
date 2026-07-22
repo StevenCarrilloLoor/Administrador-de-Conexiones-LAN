@@ -1,13 +1,26 @@
 """Enumeracion de interfaces de red activas y sus subredes IPv4.
 
-Se apoya en la tabla de rutas de scapy (multiplataforma). Devuelve una subred
-por interfaz con IP local, para escanear "todas las interfaces activas" (Fase 1).
+Se apoya en la tabla de rutas de scapy (multiplataforma). Devuelve una subred por
+interfaz FISICA con IP local, para escanear la LAN real (Fase 1).
+
+Excluye adaptadores VIRTUALES o de VPN (Radmin, Hamachi, VMware, Hyper-V, TAP, etc.),
+porque esas redes contienen equipos ajenos y hacen que el propio equipo aparezca
+duplicado (una vez por adaptador). Ver `_VIRTUAL_PATTERNS`.
 """
 from __future__ import annotations
 
 import ipaddress
 from dataclasses import dataclass
 from typing import Optional
+
+# Subcadenas (en minusculas) de descripciones de adaptadores a EXCLUIR del escaneo.
+_VIRTUAL_PATTERNS = (
+    "radmin", "hamachi", "zerotier", "tailscale", "wireguard", "openvpn",
+    "nordlynx", "proton", "tap-windows", "tap adapter", "vpn",
+    "virtual", "vmware", "virtualbox", "hyper-v", "vethernet",
+    "loopback", "bluetooth", "wan miniport", "teredo", "isatap", "6to4",
+    "pseudo-interface", "docker", "wi-fi direct", "vswitch",
+)
 
 
 @dataclass
@@ -17,6 +30,7 @@ class ActiveSubnet:
     cidr: str             # subred a escanear, p. ej. 192.168.0.0/24
     gateway: Optional[str]  # gateway si se conoce
     host_count: int       # cantidad de hosts direccionables
+    description: str = ""  # descripcion del adaptador (Windows)
 
     def as_dict(self) -> dict:
         return {
@@ -25,6 +39,7 @@ class ActiveSubnet:
             "cidr": self.cidr,
             "gateway": self.gateway,
             "host_count": self.host_count,
+            "description": self.description,
         }
 
 
@@ -36,14 +51,35 @@ def _iface_name(iface) -> str:
     return str(iface)
 
 
-def list_active_subnets(max_prefixlen_hosts: int = 4096) -> list[ActiveSubnet]:
-    """Devuelve subredes IPv4 locales candidatas a escanear.
+def is_virtual_description(desc: Optional[str]) -> bool:
+    d = (desc or "").lower()
+    return any(p in d for p in _VIRTUAL_PATTERNS)
 
-    Filtra loopback (127/8) y link-local (169.254/16). Limita subredes enormes
-    para no lanzar un escaneo de millones de IPs por accidente.
+
+def ip_to_description() -> dict[str, str]:
+    """Mapa IP-local -> descripcion del adaptador (Windows). {} en otros SO o si falla."""
+    out: dict[str, str] = {}
+    try:
+        from scapy.arch.windows import get_windows_if_list  # solo Windows
+        for it in get_windows_if_list():
+            desc = str(it.get("description") or it.get("name") or "")
+            for ip in (it.get("ips") or []):
+                out[str(ip)] = desc
+    except Exception:
+        pass
+    return out
+
+
+def list_active_subnets(max_prefixlen_hosts: int = 4096,
+                        include_virtual: bool = False) -> list[ActiveSubnet]:
+    """Devuelve subredes IPv4 locales candidatas a escanear (solo fisicas por defecto).
+
+    Filtra loopback (127/8), link-local (169.254/16), rutas de host (/31,/32) y —salvo
+    include_virtual=True— adaptadores virtuales/VPN (por descripcion).
     """
     from scapy.all import conf  # import diferido: solo cuando se usa
 
+    descriptions = ip_to_description()
     results: dict[str, ActiveSubnet] = {}
     gateways: dict[str, str] = {}
 
@@ -69,6 +105,12 @@ def list_active_subnets(max_prefixlen_hosts: int = 4096) -> list[ActiveSubnet]:
             out_ip = ipaddress.IPv4Address(outip)
             if out_ip.is_loopback or out_ip.is_link_local:
                 continue
+
+            # Excluir adaptadores virtuales / VPN por descripcion
+            desc = descriptions.get(str(out_ip), "") or getattr(iface, "description", "") or ""
+            if not include_virtual and is_virtual_description(desc):
+                continue
+
             network = ipaddress.IPv4Network(f"{net_addr}/{netmask}", strict=False)
             # Descartar rutas de host/broadcast (/31, /32): no son subredes LAN utiles.
             if network.prefixlen >= 31:
@@ -83,6 +125,7 @@ def list_active_subnets(max_prefixlen_hosts: int = 4096) -> list[ActiveSubnet]:
                 cidr=str(network),
                 gateway=gateways.get(name),
                 host_count=max(network.num_addresses - 2, 0),
+                description=desc,
             )
             results[sub.cidr] = sub
         except Exception:
