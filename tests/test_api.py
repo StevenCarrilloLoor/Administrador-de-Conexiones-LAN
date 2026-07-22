@@ -5,7 +5,7 @@ async def test_status(client):
     r = await client.get("/api/status")
     assert r.status_code == 200
     body = r.json()
-    assert body["phase"] == 1
+    assert body["phase"] == 3
     assert body["oui_prefixes"] > 30000
     assert body["config"]["auth_enabled"] is False
     assert "capabilities" in body
@@ -96,10 +96,12 @@ async def test_scan_is_post_not_get(client, app):
     assert r.status_code == 200 and r.json()["online_count"] == 2
 
 
-async def test_phase2_and_phase3_endpoints_501(client, app, seed):
+async def test_phase2_endpoints_501(client, app, seed):
+    # El control activo (bloqueo/limite via ARP) sigue deshabilitado honestamente.
     res = seed(app, mac="AA:BB:CC:00:00:05", ip="192.168.0.9")
     assert (await client.post(f"/api/devices/{res.device_id}/block")).status_code == 501
-    assert (await client.get("/api/network/speedtest")).status_code == 501
+    assert (await client.post(f"/api/devices/{res.device_id}/limit",
+                              json={"kbps": 100})).status_code == 501
 
 
 async def test_stats_vendors(client, app, seed):

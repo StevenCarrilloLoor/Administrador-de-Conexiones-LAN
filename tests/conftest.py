@@ -40,13 +40,34 @@ def repos(db):
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    """App FastAPI con BD y logs temporales, sin auto-escaneo."""
+    """App FastAPI con BD y logs temporales, sin auto-escaneo ni auth (para los tests)."""
     monkeypatch.setenv("LANMGR_AUTO_SCAN", "false")
+    monkeypatch.setenv("LANMGR_AUTH_REQUIRED", "false")
     monkeypatch.setenv("LANMGR_DB_PATH", str(tmp_path / "api.db"))
     monkeypatch.setenv("LANMGR_LOG_DIR", str(tmp_path / "logs"))
     from api.app import create_app
     from api.config import Config
     return create_app(Config.load())
+
+
+@pytest.fixture
+def app_auth(tmp_path, monkeypatch):
+    """App con autenticacion REQUERIDA (para los tests de login)."""
+    monkeypatch.setenv("LANMGR_AUTO_SCAN", "false")
+    monkeypatch.setenv("LANMGR_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("LANMGR_DB_PATH", str(tmp_path / "api_auth.db"))
+    monkeypatch.setenv("LANMGR_LOG_DIR", str(tmp_path / "logs"))
+    from api.app import create_app
+    from api.config import Config
+    return create_app(Config.load())
+
+
+@pytest.fixture
+async def client_auth(app_auth):
+    import httpx
+    transport = httpx.ASGITransport(app=app_auth)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from db.repositories import parse_iso
 from ..logging_setup import audit
-from ..models import DeviceDetailOut, DeviceOut, DeviceUpdateIn
+from ..models import DeviceDetailOut, DeviceOut, DeviceUpdateIn, WatchIn
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -32,6 +32,7 @@ def to_device_out(row: dict, ttl: int) -> dict:
     out = dict(row)
     out["is_random_mac"] = bool(row.get("is_random_mac"))
     out["is_blocked"] = bool(row.get("is_blocked"))
+    out["is_watched"] = bool(row.get("is_watched"))
     out["online"] = compute_online(row.get("last_seen"), ttl)
     out["display_name"] = display_name(row)
     return out
@@ -66,6 +67,21 @@ def update_device(device_id: int, body: DeviceUpdateIn, request: Request):
     audit("device_update", device_id=device_id,
           custom_name=body.custom_name, group=body.device_group)
     return to_device_out(row, st.config.online_ttl)
+
+
+@router.post("/{device_id}/watch", response_model=DeviceOut)
+def watch_device(device_id: int, body: WatchIn, request: Request):
+    """Marca/desmarca un equipo como 'vigilado' (siempre conectado).
+
+    Si un equipo vigilado se cae, el escaner genera una alerta 'device_down'
+    y dispara las notificaciones configuradas. [Fase 3]
+    """
+    st = request.app.state
+    if not st.device_repo.get(device_id):
+        raise HTTPException(status_code=404, detail="Dispositivo no encontrado")
+    st.device_repo.set_watched(device_id, body.watched)
+    audit("device_watch", device_id=device_id, watched=body.watched)
+    return to_device_out(st.device_repo.get(device_id), st.config.online_ttl)
 
 
 # --- Control activo: Fase 2 (endpoints presentes, deshabilitados honestamente) ---

@@ -20,8 +20,12 @@ datas = [
 binaries = []
 hiddenimports = []
 
-# Paquetes que cargan submodulos/datos dinamicamente
-for pkg in ("uvicorn", "scapy", "apscheduler", "tzdata", "pystray", "fastapi", "starlette"):
+# Paquetes que cargan submodulos/datos dinamicamente.
+#  - bcrypt: extension nativa (_bcrypt) para el hashing de contraseñas (Fase 3).
+#  - requests/certifi: cliente HTTP + bundle de CA para notificaciones (Telegram/
+#    ntfy) y el test de velocidad por HTTPS (Fase 3).
+for pkg in ("uvicorn", "scapy", "apscheduler", "tzdata", "pystray", "fastapi",
+            "starlette", "bcrypt", "requests", "certifi"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

@@ -20,6 +20,7 @@ class DeviceOut(BaseModel):
     last_seen: Optional[str] = None
     is_blocked: bool = False
     bandwidth_limit_kbps: Optional[int] = None
+    is_watched: bool = False
     # derivados
     online: bool = False
     display_name: str = ""
@@ -40,6 +41,10 @@ class DeviceDetailOut(DeviceOut):
 class DeviceUpdateIn(BaseModel):
     custom_name: Optional[str] = Field(default=None, max_length=120)
     device_group: Optional[str] = Field(default=None, max_length=60)
+
+
+class WatchIn(BaseModel):
+    watched: bool = True
 
 
 class BlockIn(BaseModel):

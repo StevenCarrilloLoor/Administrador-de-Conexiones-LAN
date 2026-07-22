@@ -75,3 +75,78 @@ def test_prune_now(db, monkeypatch):
     svc.events.add(dev["id"], "disconnected", ts=old)
     res = svc.prune_now()
     assert res.get("events_pruned", 0) >= 1
+
+
+# --- Fase 3: notificaciones y defensa cableadas al escaner --------------------
+class _RecordingNotifier:
+    def __init__(self):
+        self.sent = []
+
+    def notify(self, title, message):
+        self.sent.append((title, message))
+
+
+def test_new_device_triggers_notification(db, monkeypatch):
+    notif = _RecordingNotifier()
+    svc = ScannerService(db, notifier=notif)
+    _patch_scan(monkeypatch, [_dev("AA:BB:CC:00:00:01", "192.168.0.5")])
+    svc.scan_once()
+    assert len(notif.sent) == 1
+    assert "nuevo" in notif.sent[0][0].lower()
+
+
+def test_watched_device_down_alerts_and_notifies(db, monkeypatch):
+    notif = _RecordingNotifier()
+    svc = ScannerService(db, notifier=notif)
+    d = _dev("AA:BB:CC:00:00:01", "192.168.0.5")
+    _patch_scan(monkeypatch, [d])
+    svc.scan_once()                         # alta (dispara aviso de nuevo)
+    dev = svc.devices.get_by_mac("AA:BB:CC:00:00:01")
+    svc.devices.set_watched(dev["id"], True)  # marcar como vigilado
+    notif.sent.clear()
+    _patch_scan(monkeypatch, [])            # se cae
+    svc.scan_once()
+    # alerta device_down + notificacion
+    alerts = svc.alerts.list_recent()
+    assert any(a["alert_type"] == "device_down" for a in alerts)
+    assert any("caido" in t.lower() or "vigilado" in m.lower() for t, m in notif.sent)
+
+
+def test_unwatched_device_down_does_not_alert(db, monkeypatch):
+    notif = _RecordingNotifier()
+    svc = ScannerService(db, notifier=notif)
+    d = _dev("AA:BB:CC:00:00:01", "192.168.0.5")
+    _patch_scan(monkeypatch, [d])
+    svc.scan_once()
+    notif.sent.clear()
+    _patch_scan(monkeypatch, [])
+    svc.scan_once()
+    alerts = svc.alerts.list_recent()
+    assert not any(a["alert_type"] == "device_down" for a in alerts)
+
+
+def test_defense_check_detects_spoof(db, monkeypatch):
+    import agent.arp_defense as ad
+    from agent.arp_defense import ArpDefense
+    from db.repositories import SettingsRepository
+
+    notif = _RecordingNotifier()
+    defense = ArpDefense(SettingsRepository(db))
+    svc = ScannerService(db, notifier=notif, defense=defense)
+    # gateway detectado
+    fake_subnet = type("S", (), {"gateway": "192.168.1.1"})()
+    monkeypatch.setattr(ss, "list_active_subnets", lambda include_virtual=False: [fake_subnet])
+    # primer chequeo fija la referencia
+    monkeypatch.setattr(ad, "gateway_mac", lambda ip: "AA:BB:CC:DD:EE:FF")
+    svc.defense_check()
+    # ahora la MAC cambia -> spoofing
+    monkeypatch.setattr(ad, "gateway_mac", lambda ip: "66:66:66:66:66:66")
+    res = svc.defense_check()
+    assert res["spoofed"] is True
+    assert any(a["alert_type"] == "arp_spoof_detected" for a in svc.alerts.list_recent())
+    assert len(notif.sent) >= 1
+
+
+def test_defense_check_noop_without_module(db, monkeypatch):
+    svc = ScannerService(db)  # sin defensa
+    assert svc.defense_check() == {}

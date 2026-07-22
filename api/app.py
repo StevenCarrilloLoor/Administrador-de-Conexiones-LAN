@@ -9,10 +9,13 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
+from agent.arp_defense import ArpDefense
+from agent.notifier import NotificationManager
 from agent.oui import shared_lookup
 from agent.platform_checks import check_capabilities
 from agent.scanner_service import ScannerService
@@ -25,13 +28,21 @@ from db.repositories import (
     SettingsRepository,
 )
 
+from .auth import COOKIE_NAME, AuthService
 from .config import Config
 from .logging_setup import setup_logging
 from .routers import alerts as alerts_router
+from .routers import auth as auth_router
 from .routers import devices as devices_router
 from .routers import network as network_router
 from .routers import rules as rules_router
+from .routers import tools as tools_router
 from .ws import ConnectionManager
+
+# Rutas publicas (accesibles sin sesion): endpoints de auth y la pagina de login
+# (que es autocontenida, con estilos inline).
+_PUBLIC_PREFIXES = ("/api/auth/", "/login")
+_PUBLIC_EXACT: set[str] = set()
 
 log = logging.getLogger("lanmanager.api")
 
@@ -65,8 +76,10 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Administrador de Conexiones LAN",
-        version="1.0.0-fase1",
-        description="Descubrimiento e inventario de dispositivos en la red local (Fase 1).",
+        version="1.0.0",
+        description=("Descubrimiento e inventario de la red local, con autenticacion, "
+                     "reglas/horarios, notificaciones, utilidades (Wake-on-LAN, test de "
+                     "velocidad, exportacion) y defensa anti-spoofing del propio equipo."),
         lifespan=lifespan,
     )
     # Sin CORS: el dashboard se sirve desde el MISMO origen que la API (app.mount("/")),
@@ -82,12 +95,15 @@ def create_app(config: Config | None = None) -> FastAPI:
     st.alert_repo = AlertRepository(db)
     st.rule_repo = RuleRepository(db)
     st.settings_repo = SettingsRepository(db)
+    st.auth = AuthService(st.settings_repo)
+    st.notifier = NotificationManager(st.settings_repo)
+    st.defense = ArpDefense(st.settings_repo)
     st.capabilities = check_capabilities()
     st.ws = ConnectionManager()
     st.scanner = ScannerService(
         db, interval_seconds=cfg.scan_interval,
         broadcast=st.ws.broadcast_threadsafe, scan_timeout=cfg.scan_timeout,
-        retention_days=cfg.retention_days,
+        retention_days=cfg.retention_days, notifier=st.notifier, defense=st.defense,
     )
 
     for msg in st.capabilities.messages:
@@ -98,11 +114,30 @@ def create_app(config: Config | None = None) -> FastAPI:
             "La autenticacion es de Fase 3: no lo expongas hasta implementarla.", cfg.host,
         )
 
+    # Middleware de autenticacion: protege API y dashboard. Deja pasar las rutas
+    # publicas (login/setup/status y la pagina de login). [Fase 3]
+    @app.middleware("http")
+    async def _auth_guard(request: Request, call_next):
+        if not cfg.auth_required:
+            return await call_next(request)
+        path = request.url.path
+        if path in _PUBLIC_EXACT or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+            return await call_next(request)
+        token = request.cookies.get(COOKIE_NAME)
+        if st.auth.verify_session_token(token):
+            return await call_next(request)
+        # No autenticado
+        if path.startswith("/api") or path.startswith("/ws"):
+            return JSONResponse({"detail": "No autenticado"}, status_code=401)
+        return RedirectResponse(url="/login", status_code=302)
+
     # Routers
+    app.include_router(auth_router.router)
     app.include_router(devices_router.router)
     app.include_router(rules_router.router)
     app.include_router(alerts_router.router)
     app.include_router(network_router.router)
+    app.include_router(tools_router.router)
 
     @app.get("/api/status", tags=["status"])
     def status():
@@ -110,7 +145,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         return {
             "app": "Administrador de Conexiones LAN",
             "version": app.version,
-            "phase": 1,
+            "phase": 3,
             "capabilities": caps,
             "scanner": st.scanner.status,
             "counts": {
@@ -123,7 +158,8 @@ def create_app(config: Config | None = None) -> FastAPI:
                 "host": cfg.host, "port": cfg.port,
                 "scan_interval": cfg.scan_interval, "online_ttl": cfg.online_ttl,
                 "exposed_on_lan": cfg.exposed_on_lan,
-                "auth_enabled": False,  # Fase 3
+                "auth_enabled": bool(cfg.auth_required),
+                "auth_configured": st.auth.is_configured(),
             },
             "limitations": LIMITATIONS_ES,
         }
@@ -132,8 +168,18 @@ def create_app(config: Config | None = None) -> FastAPI:
     def vendor_stats():
         return st.device_repo.vendor_breakdown()
 
+    @app.get("/login", include_in_schema=False)
+    def login_page():
+        from fastapi.responses import FileResponse
+        import os
+        return FileResponse(os.path.join(cfg.dashboard_dir, "login.html"))
+
     @app.websocket("/ws/live")
     async def ws_live(ws: WebSocket):
+        # Autenticacion del WebSocket por cookie (el middleware HTTP no cubre WS).
+        if cfg.auth_required and not st.auth.verify_session_token(ws.cookies.get(COOKIE_NAME)):
+            await ws.close(code=1008)  # policy violation
+            return
         await st.ws.connect(ws)
         try:
             # Estado inicial al conectar. La lectura SQLite (bloqueante) va a un
@@ -158,11 +204,16 @@ def create_app(config: Config | None = None) -> FastAPI:
 
 
 LIMITATIONS_ES = [
-    "Solo funciona contra dispositivos del mismo segmento de red (misma LAN/Wi-Fi); no cruza VLANs.",
-    "No funciona si el router tiene aislamiento de clientes (AP client isolation) en el Wi-Fi.",
-    "No funciona si el router usa ARP estatico o Dynamic ARP Inspection (comun en redes de oficina gestionadas).",
-    "El bloqueo/limite (Fase 2) deja de aplicarse si este equipo se apaga, suspende o se cierra el proceso.",
-    "El antivirus/firewall del dispositivo objetivo puede detectar el spoofing (misma tecnica base que un MITM).",
+    "El descubrimiento solo alcanza dispositivos del mismo segmento de red (misma LAN/Wi-Fi); no cruza VLANs.",
+    "No detecta equipos si el router tiene aislamiento de clientes (AP client isolation) en el Wi-Fi.",
+    "El escaneo puede ser parcial si el router usa ARP estatico o Dynamic ARP Inspection (redes gestionadas).",
+    "Las reglas de bloqueo/limite/horario se registran como configuracion y eventos: el enforcement activo "
+    "de trafico NO esta habilitado (se gestiona desde el router o de forma manual).",
+    "La deteccion de 'equipo caido' depende del intervalo de escaneo y del TTL en linea: una caida muy breve "
+    "puede no registrarse.",
+    "La defensa anti-spoofing vigila y alerta sobre la tabla ARP de ESTE equipo; no protege a terceros ni "
+    "bloquea al atacante (es defensiva, no ofensiva).",
+    "Las notificaciones y el test de velocidad requieren salida a internet; sin conexion, se registran los fallos.",
 ]
 
 

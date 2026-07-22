@@ -39,6 +39,7 @@ class Config:
     scan_timeout: float = 3.0
     auto_scan: bool = True
     retention_days: int = 30
+    auth_required: bool = True
     db_path: str = field(default_factory=lambda: str(apppaths.db_path()))
     log_dir: str = field(default_factory=lambda: str(apppaths.log_dir()))
     dashboard_dir: str = field(default_factory=lambda: str(apppaths.dashboard_dir()))
@@ -63,6 +64,7 @@ class Config:
             scan_timeout=float(_get(cfg, "scan", "timeout", 3.0)),
             auto_scan=as_bool(_get(cfg, "scan", "auto_scan", "true")),
             retention_days=int(_get(cfg, "scan", "retention_days", 30)),
+            auth_required=as_bool(_get(cfg, "server", "auth_required", "true")),
             db_path=_get(cfg, "server", "db_path", str(apppaths.db_path())),
             log_dir=_get(cfg, "server", "log_dir", str(apppaths.log_dir())),
             dashboard_dir=str(apppaths.dashboard_dir()),

@@ -155,6 +155,11 @@ class DeviceRepository:
             c.execute("UPDATE devices SET bandwidth_limit_kbps = ? WHERE id = ?",
                       (kbps, device_id))
 
+    def set_watched(self, device_id: int, watched: bool) -> None:
+        with self.db.connect() as c:
+            c.execute("UPDATE devices SET is_watched = ? WHERE id = ?",
+                      (1 if watched else 0, device_id))
+
     def vendor_breakdown(self) -> list[dict]:
         with self.db.connect() as c:
             rows = c.execute(

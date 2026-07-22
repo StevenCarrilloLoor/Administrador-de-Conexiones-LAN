@@ -40,12 +40,16 @@ class ScannerService:
         broadcast: Optional[BroadcastFn] = None,
         scan_timeout: float = 3.0,
         retention_days: int = 30,
+        notifier=None,
+        defense=None,
     ):
         self.db = db
         self.interval = max(5, int(interval_seconds))
         self.broadcast = broadcast
         self.scan_timeout = scan_timeout
         self.retention_days = max(1, int(retention_days))
+        self.notifier = notifier   # NotificationManager (opcional)
+        self.defense = defense     # ArpDefense (opcional)
 
         self.devices = DeviceRepository(db)
         self.events = ConnectionEventRepository(db)
@@ -73,6 +77,14 @@ class ScannerService:
             self.prune_now, "interval", hours=24,
             id="retention_prune", max_instances=1, coalesce=True,
         )
+        # Defensa anti-spoofing: vigila el ARP del gateway propio. [Fase 3]
+        # Solo se agenda si hay un modulo de defensa inyectado (no bloquea trafico:
+        # unicamente lee la tabla ARP local, alerta y notifica).
+        if self.defense is not None:
+            self._scheduler.add_job(
+                self.defense_check, "interval", minutes=2,
+                id="defense_check", max_instances=1, coalesce=True,
+            )
         self._scheduler.start()
         log.info("ScannerService iniciado (intervalo=%ss, retencion=%sd)",
                  self.interval, self.retention_days)
@@ -89,6 +101,33 @@ class ScannerService:
             return {"events_pruned": ev, "alerts_pruned": al}
         except Exception as exc:
             log.exception("Fallo en la purga de retencion: %s", exc)
+            return {"error": str(exc)}
+
+    def _notify(self, title: str, message: str) -> None:
+        if self.notifier is not None:
+            try:
+                self.notifier.notify(title, message)
+            except Exception:
+                log.exception("Fallo al enviar notificacion")
+
+    def defense_check(self) -> dict:
+        """Chequeo defensivo del ARP del gateway; alerta+notifica si hay spoofing. [Fase 3]"""
+        if self.defense is None:
+            return {}
+        try:
+            gw = next((s.gateway for s in list_active_subnets() if s.gateway), None)
+            if not gw:
+                return {}
+            res = self.defense.check(gw)
+            if res.get("spoofed"):
+                msg = (f"Posible ARP spoofing del gateway {gw}: la MAC cambio de "
+                       f"{res.get('baseline')} a {res.get('current')}.")
+                self.alerts.add("arp_spoof_detected", msg, severity="critical")
+                self._notify("ALERTA de seguridad", msg)
+                log.warning(msg)
+            return res
+        except Exception as exc:
+            log.exception("Fallo en defense_check: %s", exc)
             return {"error": str(exc)}
 
     def stop(self) -> None:
@@ -156,6 +195,11 @@ class ScannerService:
                 )
                 summary["new"].append({"id": res.device_id, "mac": d.mac,
                                        "ip": d.ip, "label": label})
+                # Aviso desacoplado: posible intruso en la red. [Fase 3]
+                self._notify(
+                    "Dispositivo nuevo en la red",
+                    f"Se detecto un equipo nuevo: {label} ({d.ip} / {d.mac}).",
+                )
             else:
                 if d.mac not in self._online_macs:
                     self.events.add(res.device_id, "connected", detail=f"IP {d.ip}", ts=now)
@@ -174,9 +218,16 @@ class ScannerService:
         for mac in gone:
             dev = self.devices.get_by_mac(mac)
             if dev:
+                label = dev.get("custom_name") or dev.get("hostname") or mac
                 self.events.add(dev["id"], "disconnected", ts=now)
                 summary["disconnected"].append({"id": dev["id"], "mac": mac,
-                                                "label": dev.get("custom_name") or dev.get("hostname") or mac})
+                                                "label": label})
+                # Alerta si un equipo "vigilado" (siempre conectado) se cae. [Fase 3]
+                if dev.get("is_watched"):
+                    msg = f"El equipo vigilado '{label}' ({mac}) se desconecto de la red."
+                    self.alerts.add("device_down", msg, device_id=dev["id"],
+                                    severity="warning", ts=now)
+                    self._notify("Equipo vigilado caido", msg)
 
         self._online_macs = current_macs
 

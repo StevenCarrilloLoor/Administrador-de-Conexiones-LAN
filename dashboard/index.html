@@ -14,7 +14,7 @@
       <span class="logo">🛰️</span>
       <div>
         <h1>Administrador de Conexiones LAN</h1>
-        <span class="subtitle">Fase 1 · Descubrimiento e inventario</span>
+        <span class="subtitle">Descubrimiento · inventario · reglas · alertas</span>
       </div>
     </div>
     <div class="header-actions">
@@ -24,6 +24,7 @@
       <button id="scan-btn" class="btn btn-primary">
         <span class="scan-ico">⟳</span> Escanear ahora
       </button>
+      <button id="logout-btn" class="btn hidden" title="Cerrar sesión">Salir</button>
     </div>
   </header>
 
@@ -32,56 +33,213 @@
   <!-- Banner de exposicion / autenticacion -->
   <div id="auth-banner" class="banner banner-warn hidden"></div>
 
-  <!-- Tarjetas de resumen -->
-  <section class="stats-row" id="stats-row">
-    <div class="stat-card"><div class="stat-value" id="stat-online">–</div><div class="stat-label">En línea</div></div>
-    <div class="stat-card"><div class="stat-value" id="stat-total">–</div><div class="stat-label">Inventario</div></div>
-    <div class="stat-card"><div class="stat-value" id="stat-new">–</div><div class="stat-label">Nuevos (24 h)</div></div>
-    <div class="stat-card"><div class="stat-value" id="stat-alerts">–</div><div class="stat-label">Alertas sin leer</div></div>
-    <div class="stat-card stat-scan"><div class="stat-value" id="stat-lastscan">–</div><div class="stat-label">Último escaneo</div></div>
-  </section>
+  <!-- Navegacion por vistas -->
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="inventario">📋 Inventario</button>
+    <button class="tab" data-view="reglas">🗓️ Reglas y horarios</button>
+    <button class="tab" data-view="herramientas">🧰 Herramientas</button>
+  </nav>
 
-  <main class="layout">
-    <section class="col-main">
-      <div class="toolbar">
-        <div class="search-wrap">
-          <span class="search-ico">🔎</span>
-          <input id="search" type="search" placeholder="Buscar por IP, MAC, nombre, fabricante o grupo…" autocomplete="off" />
-        </div>
-        <div class="filters">
-          <label class="chk"><input type="checkbox" id="filter-online" /> Solo en línea</label>
-          <select id="group-filter"><option value="">Todos los grupos</option></select>
-        </div>
-      </div>
-
-      <div id="device-list" class="device-list"><!-- tarjetas por JS --></div>
-      <div id="empty-state" class="empty-state hidden">
-        <p>No hay dispositivos en el inventario todavía.</p>
-        <p class="muted">Ejecuta un escaneo. Si el botón no encuentra nada, revisa Npcap, los privilegios de administrador y tu conexión a la LAN.</p>
-      </div>
+  <!-- ================= VISTA: INVENTARIO ================= -->
+  <section class="view active" id="view-inventario">
+    <section class="stats-row" id="stats-row">
+      <div class="stat-card"><div class="stat-value" id="stat-online">–</div><div class="stat-label">En línea</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-total">–</div><div class="stat-label">Inventario</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-new">–</div><div class="stat-label">Nuevos (24 h)</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-watched">–</div><div class="stat-label">Vigilados</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-alerts">–</div><div class="stat-label">Alertas sin leer</div></div>
+      <div class="stat-card stat-scan"><div class="stat-value" id="stat-lastscan">–</div><div class="stat-label">Último escaneo</div></div>
     </section>
 
-    <aside class="col-side">
+    <main class="layout">
+      <section class="col-main">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <span class="search-ico">🔎</span>
+            <input id="search" type="search" placeholder="Buscar por IP, MAC, nombre, fabricante o grupo…" autocomplete="off" />
+          </div>
+          <div class="filters">
+            <label class="chk"><input type="checkbox" id="filter-online" /> Solo en línea</label>
+            <label class="chk"><input type="checkbox" id="filter-watched" /> Solo vigilados</label>
+            <select id="group-filter"><option value="">Todos los grupos</option></select>
+          </div>
+        </div>
+
+        <div id="device-list" class="device-list"><!-- tarjetas por JS --></div>
+        <div id="empty-state" class="empty-state hidden">
+          <p>No hay dispositivos en el inventario todavía.</p>
+          <p class="muted">Ejecuta un escaneo. Si el botón no encuentra nada, revisa Npcap, los privilegios de administrador y tu conexión a la LAN.</p>
+        </div>
+      </section>
+
+      <aside class="col-side">
+        <div class="panel">
+          <h2>Distribución por fabricante</h2>
+          <div class="chart-wrap"><canvas id="vendor-chart"></canvas></div>
+          <p id="chart-fallback" class="muted small hidden">Gráfica no disponible sin conexión (Chart.js). El resto del panel funciona igual.</p>
+        </div>
+
+        <div class="panel">
+          <h2>Alertas recientes <span id="alert-count" class="pill">0</span></h2>
+          <div id="alert-list" class="alert-list"><p class="muted small">Sin alertas.</p></div>
+        </div>
+
+        <div class="panel panel-muted">
+          <h2>Limitaciones técnicas</h2>
+          <ul id="limitations" class="limitations"><!-- por JS --></ul>
+        </div>
+      </aside>
+    </main>
+  </section>
+
+  <!-- ================= VISTA: REGLAS Y HORARIOS ================= -->
+  <section class="view" id="view-reglas">
+    <div class="view-intro">
+      <h2>Reglas y horarios</h2>
+      <p class="muted">Definí la lógica de control (bloqueo, límite de ancho de banda, horarios).
+        Las reglas se guardan y se muestran aquí; <b>el enforcement activo de tráfico no está
+        habilitado</b> en esta entrega: las reglas quedan registradas como configuración y como
+        eventos, para gestionarse desde el router o de forma manual.</p>
+    </div>
+
+    <div class="rules-grid">
       <div class="panel">
-        <h2>Distribución por fabricante</h2>
-        <div class="chart-wrap"><canvas id="vendor-chart"></canvas></div>
-        <p id="chart-fallback" class="muted small hidden">Gráfica no disponible sin conexión (Chart.js). El resto del panel funciona igual.</p>
+        <h3>Nueva regla</h3>
+        <form id="rule-form" class="form">
+          <label>Tipo de regla
+            <select id="rule-type">
+              <option value="schedule">Horario (encendido/apagado lógico)</option>
+              <option value="block">Bloqueo (lógico)</option>
+              <option value="bandwidth_limit">Límite de ancho de banda</option>
+            </select>
+          </label>
+          <label>Aplicar a
+            <select id="rule-target"><!-- por JS: dispositivos + grupos --></select>
+          </label>
+          <div id="rule-bw-wrap" class="hidden">
+            <label>Límite (kbps)
+              <input id="rule-kbps" type="number" min="1" step="64" placeholder="p. ej. 1024" />
+            </label>
+          </div>
+          <div id="rule-sched-wrap">
+            <div class="row-2">
+              <label>Desde <input id="rule-start" type="time" value="22:00" /></label>
+              <label>Hasta <input id="rule-end" type="time" value="07:00" /></label>
+            </div>
+            <fieldset class="days">
+              <legend>Días</legend>
+              <label><input type="checkbox" class="dow" value="0" checked /> Lun</label>
+              <label><input type="checkbox" class="dow" value="1" checked /> Mar</label>
+              <label><input type="checkbox" class="dow" value="2" checked /> Mié</label>
+              <label><input type="checkbox" class="dow" value="3" checked /> Jue</label>
+              <label><input type="checkbox" class="dow" value="4" checked /> Vie</label>
+              <label><input type="checkbox" class="dow" value="5" /> Sáb</label>
+              <label><input type="checkbox" class="dow" value="6" /> Dom</label>
+            </fieldset>
+          </div>
+          <button type="submit" class="btn btn-primary">Agregar regla</button>
+        </form>
       </div>
 
       <div class="panel">
-        <h2>Alertas recientes <span id="alert-count" class="pill">0</span></h2>
-        <div id="alert-list" class="alert-list"><p class="muted small">Sin alertas.</p></div>
+        <h3>Vista semanal de horarios</h3>
+        <div id="calendar" class="calendar"><!-- grid por JS --></div>
+        <p class="muted small">Cada franja coloreada es una regla de horario. Pasá el cursor para ver el detalle.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Reglas configuradas <span id="rule-count" class="pill">0</span></h3>
+      <div id="rule-list" class="rule-list"><p class="muted small">Sin reglas configuradas.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= VISTA: HERRAMIENTAS ================= -->
+  <section class="view" id="view-herramientas">
+    <div class="tools-grid">
+      <div class="panel">
+        <h3>📤 Exportar datos</h3>
+        <p class="muted small">Descargá el inventario y el historial en formato abierto.</p>
+        <div class="btn-row">
+          <a class="btn" href="/api/export/devices.csv">Dispositivos · CSV</a>
+          <a class="btn" href="/api/export/devices.json">Dispositivos · JSON</a>
+        </div>
+        <div class="btn-row">
+          <a class="btn" href="/api/export/events.csv">Eventos · CSV</a>
+          <a class="btn" href="/api/export/events.json">Eventos · JSON</a>
+        </div>
       </div>
 
-      <div class="panel panel-muted">
-        <h2>Limitaciones técnicas</h2>
-        <ul id="limitations" class="limitations"><!-- por JS --></ul>
+      <div class="panel">
+        <h3>⚡ Test de velocidad de internet</h3>
+        <p class="muted small">Mide latencia, descarga y subida contra Cloudflare.</p>
+        <button id="speed-btn" class="btn btn-primary">Medir ahora</button>
+        <div id="speed-result" class="speed-result hidden">
+          <div><span class="k">Latencia</span><span class="v" id="speed-lat">—</span></div>
+          <div><span class="k">Descarga</span><span class="v" id="speed-down">—</span></div>
+          <div><span class="k">Subida</span><span class="v" id="speed-up">—</span></div>
+        </div>
       </div>
-    </aside>
-  </main>
+
+      <div class="panel">
+        <h3>🛡️ Defensa anti-spoofing (este equipo)</h3>
+        <p class="muted small">Vigila la MAC del gateway en tu propia tabla ARP. Puramente
+          defensivo: no envía paquetes ni ataca a nadie.</p>
+        <div id="defense-status" class="defense-status">
+          <span class="k">Gateway</span><span class="v" id="def-gw">—</span>
+          <span class="k">MAC de referencia</span><span class="v" id="def-base">—</span>
+          <span class="k">MAC actual</span><span class="v" id="def-cur">—</span>
+          <span class="k">Estado</span><span class="v" id="def-state">—</span>
+        </div>
+        <div class="btn-row">
+          <button id="def-refresh" class="btn">Actualizar</button>
+          <button id="def-baseline" class="btn">Fijar referencia</button>
+          <button id="def-pin" class="btn" title="Fija una entrada ARP estática local (requiere admin)">Fijar ARP (admin)</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>🔔 Notificaciones</h3>
+        <p class="muted small">Recibí avisos cuando aparezca un equipo nuevo o se caiga uno
+          vigilado. La configuración se guarda localmente; los secretos no se muestran.</p>
+        <form id="notif-form" class="form">
+          <fieldset>
+            <legend><label class="chk"><input type="checkbox" id="n-tg-en" /> Telegram</label></legend>
+            <label>Bot token <input id="n-tg-token" type="password" placeholder="123456:ABC-…" autocomplete="off" /></label>
+            <label>Chat ID <input id="n-tg-chat" type="text" placeholder="p. ej. 987654321" /></label>
+          </fieldset>
+          <fieldset>
+            <legend><label class="chk"><input type="checkbox" id="n-ntfy-en" /> ntfy</label></legend>
+            <label>Servidor <input id="n-ntfy-server" type="text" placeholder="https://ntfy.sh" /></label>
+            <label>Tópico <input id="n-ntfy-topic" type="text" placeholder="mi-red-privada" /></label>
+          </fieldset>
+          <fieldset>
+            <legend><label class="chk"><input type="checkbox" id="n-smtp-en" /> Email (SMTP)</label></legend>
+            <div class="row-2">
+              <label>Host <input id="n-smtp-host" type="text" placeholder="smtp.gmail.com" /></label>
+              <label>Puerto <input id="n-smtp-port" type="text" placeholder="587" /></label>
+            </div>
+            <div class="row-2">
+              <label>Usuario <input id="n-smtp-user" type="text" autocomplete="off" /></label>
+              <label>Contraseña <input id="n-smtp-pass" type="password" autocomplete="off" /></label>
+            </div>
+            <div class="row-2">
+              <label>De <input id="n-smtp-from" type="text" placeholder="alertas@midominio" /></label>
+              <label>Para <input id="n-smtp-to" type="text" placeholder="yo@midominio" /></label>
+            </div>
+            <label class="chk"><input type="checkbox" id="n-smtp-tls" checked /> Usar STARTTLS</label>
+          </fieldset>
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary">Guardar</button>
+            <button type="button" id="notif-test" class="btn">Enviar prueba</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
 
   <footer class="footer">
-    <span>Fase 1 · <a href="/docs" target="_blank" rel="noopener">API (OpenAPI)</a> · <a href="/api/status" target="_blank" rel="noopener">estado</a></span>
+    <span><a href="/docs" target="_blank" rel="noopener">API (OpenAPI)</a> · <a href="/api/status" target="_blank" rel="noopener">estado</a></span>
     <span class="muted">Uso exclusivo en redes propias o administradas con autorización.</span>
   </footer>
 
@@ -97,6 +255,7 @@
         <input id="edit-group" type="text" maxlength="60" placeholder="p. ej. IoT, familia, invitados" list="group-suggestions" />
         <datalist id="group-suggestions"></datalist>
       </label>
+      <label class="chk"><input type="checkbox" id="edit-watched" /> Vigilar este equipo (avisar si se cae)</label>
       <div class="modal-actions">
         <button id="edit-cancel" class="btn">Cancelar</button>
         <button id="edit-save" class="btn btn-primary">Guardar</button>

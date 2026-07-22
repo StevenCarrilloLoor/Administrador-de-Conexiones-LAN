@@ -14,6 +14,10 @@ pydantic>=2.6,<3.0
 # Requiere el binario 'nmap' instalado en el sistema.
 python-nmap>=0.7.1
 
+# --- Fase 3: seguridad y utilidades ---
+bcrypt>=4.1,<6.0        # hash de contraseñas del panel (probado con 4.x y 5.x)
+requests>=2.31,<3.0     # notificaciones (Telegram/ntfy) y test de velocidad
+
 # ============================================================================
 # Dependencias de fases siguientes (NO requeridas para la Fase 1).
 # Se dejan documentadas; descomenta cuando se implemente cada fase.

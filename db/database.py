@@ -26,7 +26,8 @@ SCHEMA_PATH = apppaths.resource_path("db", "schema.sql")
 # a las BD existentes. Se usa PRAGMA user_version para registrar el estado.
 BASE_SCHEMA_VERSION = 1
 MIGRATIONS: dict[int, str] = {
-    # 2: "ALTER TABLE devices ADD COLUMN notes TEXT;",
+    # v2: marca de "vigilado" para alertar si un equipo importante se cae (Fase 3)
+    2: "ALTER TABLE devices ADD COLUMN is_watched INTEGER NOT NULL DEFAULT 0;",
 }
 
 
