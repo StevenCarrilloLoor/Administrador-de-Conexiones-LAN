@@ -1,6 +1,8 @@
 """Endpoints de dispositivos."""
 from __future__ import annotations
 
+from agent import arp_cutter
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -84,17 +86,55 @@ def watch_device(device_id: int, body: WatchIn, request: Request):
     return to_device_out(st.device_repo.get(device_id), st.config.online_ttl)
 
 
-# --- Control activo: Fase 2 (endpoints presentes, deshabilitados honestamente) ---
-@router.post("/{device_id}/block", status_code=501)
+# --- Control activo: Fase 2 ---
+@router.post("/{device_id}/block")
 def block_device(device_id: int, request: Request):
-    audit("block_requested", device_id=device_id, result="not_implemented_phase1")
-    raise HTTPException(status_code=501, detail=_PHASE2_MSG)
+    st = request.app.state
+    
+    # 1. Buscar el dispositivo en el repositorio local de la base de datos
+    row = st.device_repo.get(device_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Dispositivo no encontrado")
+    
+    device_ip = row.get("ip")
+    if not device_ip:
+        raise HTTPException(status_code=400, detail="El dispositivo no tiene una dirección IP asignada actualmente.")
+    
+    # 2. Actualizar el estado en la base de datos local para que la UI cambie visualmente
+    st.device_repo.update_meta(device_id, is_blocked=True)
+    
+    # 3. Disparar el hilo de Scapy en segundo plano
+    result = arp_cutter.toggle_cut(device_ip, action=True)
+    
+    audit("block_requested", device_id=device_id, ip=device_ip, result=result["status"])
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+        
+    return {"status": "success", "message": f"Dispositivo {device_ip} bloqueado quirúrgicamente.", "details": result}
 
 
-@router.post("/{device_id}/unblock", status_code=501)
+@router.post("/{device_id}/unblock")
 def unblock_device(device_id: int, request: Request):
-    audit("unblock_requested", device_id=device_id, result="not_implemented_phase1")
-    raise HTTPException(status_code=501, detail=_PHASE2_MSG)
+    st = request.app.state
+    
+    # 1. Buscar el dispositivo
+    row = st.device_repo.get(device_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Dispositivo no encontrado")
+    
+    device_ip = row.get("ip")
+    if not device_ip:
+        raise HTTPException(status_code=400, detail="El dispositivo no tiene una dirección IP asignada actualmente.")
+    
+    # 2. Actualizar estado en la base de datos
+    st.device_repo.update_meta(device_id, is_blocked=False)
+    
+    # 3. Detener el hilo de Scapy y restaurar la red local
+    result = arp_cutter.toggle_cut(device_ip, action=False)
+    
+    audit("unblock_requested", device_id=device_id, ip=device_ip, result=result["status"])
+    return {"status": "success", "message": f"Conexión de {device_ip} restaurada.", "details": result}
 
 
 @router.post("/{device_id}/limit", status_code=501)

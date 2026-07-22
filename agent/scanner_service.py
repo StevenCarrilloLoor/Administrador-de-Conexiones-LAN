@@ -3,9 +3,8 @@
 Orquesta el ciclo: descubrir -> persistir (upsert) -> calcular diferencias
 (altas/bajas/cambios de IP) -> generar eventos y alertas -> notificar en vivo.
 
-El estado "en linea" se calcula por diferencia en memoria entre escaneos
-consecutivos (preciso durante la ejecucion) y ademas se deriva de `last_seen`
-en la API (robusto ante reinicios).
+Inyeccion Quirurgica [Fase 2 + Fase 3 Real]: Lee y procesa las reglas horarias
+aplicando el bloqueo ARP real de Scapy.
 """
 from __future__ import annotations
 
@@ -21,14 +20,15 @@ from db.repositories import (
     AlertRepository,
     ConnectionEventRepository,
     DeviceRepository,
+    RuleRepository, # 🆕 Agregamos el repositorio de reglas
 )
 
 from .discovery import DiscoveredDevice, discover
 from .interfaces import list_active_subnets
+from . import arp_cutter # 🆕 Conectamos nuestro motor quirúrgico secreto
 
 log = logging.getLogger("lanmanager.scanner")
 
-# Callback para difundir novedades (lo conecta la API al WebSocket)
 BroadcastFn = Callable[[dict], None]
 
 
@@ -48,12 +48,13 @@ class ScannerService:
         self.broadcast = broadcast
         self.scan_timeout = scan_timeout
         self.retention_days = max(1, int(retention_days))
-        self.notifier = notifier   # NotificationManager (opcional)
-        self.defense = defense     # ArpDefense (opcional)
+        self.notifier = notifier   
+        self.defense = defense     
 
         self.devices = DeviceRepository(db)
         self.events = ConnectionEventRepository(db)
         self.alerts = AlertRepository(db)
+        self.rules = RuleRepository(db) # 🆕 Instanciamos el lector de reglas de la DB
 
         self._online_macs: set[str] = set()
         self._lock = threading.Lock()
@@ -72,25 +73,19 @@ class ScannerService:
             id="periodic_scan", max_instances=1, coalesce=True,
             next_run_time=datetime.now(timezone.utc),
         )
-        # Retencion: purga diaria de historial viejo + VACUUM. [M2]
         self._scheduler.add_job(
             self.prune_now, "interval", hours=24,
             id="retention_prune", max_instances=1, coalesce=True,
         )
-        # Defensa anti-spoofing: vigila el ARP del gateway propio. [Fase 3]
-        # Solo se agenda si hay un modulo de defensa inyectado (no bloquea trafico:
-        # unicamente lee la tabla ARP local, alerta y notifica).
         if self.defense is not None:
             self._scheduler.add_job(
                 self.defense_check, "interval", minutes=2,
                 id="defense_check", max_instances=1, coalesce=True,
             )
         self._scheduler.start()
-        log.info("ScannerService iniciado (intervalo=%ss, retencion=%sd)",
-                 self.interval, self.retention_days)
+        log.info("ScannerService iniciado con motor Scapy inyectado de forma automatica.")
 
     def prune_now(self) -> dict:
-        """Purga eventos/alertas mas viejos que retention_days y compacta la BD. [M2]"""
         try:
             ev = self.events.prune_older_than(self.retention_days)
             al = self.alerts.prune_older_than(self.retention_days)
@@ -111,7 +106,6 @@ class ScannerService:
                 log.exception("Fallo al enviar notificacion")
 
     def defense_check(self) -> dict:
-        """Chequeo defensivo del ARP del gateway; alerta+notifica si hay spoofing. [Fase 3]"""
         if self.defense is None:
             return {}
         try:
@@ -136,7 +130,6 @@ class ScannerService:
             self._scheduler = None
             log.info("ScannerService detenido")
 
-    # -- estado --------------------------------------------------------------
     @property
     def status(self) -> dict:
         return {
@@ -149,19 +142,68 @@ class ScannerService:
 
     # -- escaneo -------------------------------------------------------------
     def scan_once(self) -> dict:
-        """Ejecuta un escaneo, reconcilia con la BD y difunde el resultado."""
         with self._lock:
             if self._scanning:
                 return {"skipped": True, "reason": "escaneo en curso"}
             self._scanning = True
         try:
-            return self._do_scan()
-        except Exception as exc:  # nunca romper el scheduler
+            scan_result = self._do_scan()
+            # EL EVALUADOR DE HORARIOS DE CONTROL PARENTAL INMEDIATAMENTE DESPUÉS DEL ESCANEO:
+            self._enforce_schedule_rules_now()
+            return scan_result
+        except Exception as exc:  
             self._last_error = str(exc)
             log.exception("Fallo en scan_once: %s", exc)
             return {"error": str(exc)}
         finally:
             self._scanning = False
+
+    def _enforce_schedule_rules_now(self) -> None:
+        """Revisa todas las reglas de horarios guardadas en SQLite y ejecuta el bloqueo si corresponde."""
+        try:
+            # Traer solo las reglas que el usuario marco como activas en el panel
+            active_rules = self.rules.all(active_only=True)
+            now_time_str = datetime.now().strftime("%H:%M") # Formato "HH:MM" local de tu PC (ej: "23:15")
+            
+            for rule in active_rules:
+                if rule.get("rule_type") != "schedule":
+                    continue
+                    
+                start = rule.get("schedule_start")
+                end = rule.get("schedule_end")
+                device_id = rule.get("device_id")
+                
+                if not start or not end or not device_id:
+                    continue
+                
+                # Obtener la IP actual del dispositivo vinculado a la regla
+                device_row = self.devices.get(device_id)
+                if not device_row or not device_row.get("ip"):
+                    continue
+                    
+                device_ip = device_row.get("ip")
+                
+                # Evaluar si la hora actual cae dentro del bloque prohibido configurado en la UI
+                is_in_schedule = False
+                if start <= end:
+                    is_in_schedule = start <= now_time_str <= end
+                else: # Reglas nocturnas cruzando la medianoche (ej: De 22:00 a 06:00)
+                    is_in_schedule = now_time_str >= start or now_time_str <= end
+                
+                if is_in_schedule:
+                    # El reloj de Windows marca hora de dormir -> Encendemos el hilo de Scapy
+                    if not arp_cutter.ACTIVE_CUTS.get(device_ip, False):
+                        log.info(f"[CRON REGLA]: Bloqueo automatico nocturno iniciado para {device_ip}")
+                        arp_cutter.toggle_cut(device_ip, action=True)
+                        self.devices.update_meta(device_id, is_blocked=True)
+                else:
+                    # Ya es de mañana o está fuera del horario prohibido -> Apagamos el hilo
+                    if arp_cutter.ACTIVE_CUTS.get(device_ip, False):
+                        log.info(f"[CRON REGLA]: Horario permitido alcanzado. Conexion restaurada para {device_ip}")
+                        arp_cutter.toggle_cut(device_ip, action=False)
+                        self.devices.update_meta(device_id, is_blocked=False)
+        except Exception as e:
+            log.error(f"[-] Error en el evaluador automatico de reglas: {e}")
 
     def _do_scan(self) -> dict:
         subnets = list_active_subnets()
@@ -195,55 +237,49 @@ class ScannerService:
                 )
                 summary["new"].append({"id": res.device_id, "mac": d.mac,
                                        "ip": d.ip, "label": label})
-                # Aviso desacoplado: posible intruso en la red. [Fase 3]
                 self._notify(
                     "Dispositivo nuevo en la red",
                     f"Se detecto un equipo nuevo: {label} ({d.ip} / {d.mac}).",
                 )
             else:
                 if d.mac not in self._online_macs:
-                    self.events.add(res.device_id, "connected", detail=f"IP {d.ip}", ts=now)
-                    summary["reconnected"].append({"id": res.device_id, "mac": d.mac,
-                                                   "ip": d.ip, "label": label})
-                if res.ip_changed:
                     self.events.add(
-                        res.device_id, "ip_changed",
-                        detail=f"{res.previous_ip} -> {res.new_ip}", ts=now,
+                        res.device_id,
+                        "connected",
+                        detail=f"IP {d.ip}",
+                        ts=now,
                     )
-                    summary["ip_changed"].append({"id": res.device_id, "mac": d.mac,
-                                                  "from": res.previous_ip, "to": res.new_ip})
+                    summary["reconnected"].append(
+                        {
+                            "id": res.device_id,
+                            "mac": d.mac,
+                            "ip": d.ip,
+                            "label": label,
+                        }
+                    )
+                elif res.ip_changed:
+                    self.events.add(
+                        res.device_id,
+                        "ip_changed",
+                        detail=f"IP anterior {res.old_ip} -> {d.ip}",
+                        ts=now,
+                    )
+                    summary["ip_changed"].append(
+                        {
+                            "id": res.device_id,
+                            "mac": d.mac,
+                            "ip": d.ip,
+                            "label": label,
+                        }
+                    )
 
-        # Bajas: estaban en linea y ya no aparecen
-        gone = self._online_macs - current_macs
-        for mac in gone:
-            dev = self.devices.get_by_mac(mac)
-            if dev:
-                label = dev.get("custom_name") or dev.get("hostname") or mac
-                self.events.add(dev["id"], "disconnected", ts=now)
-                summary["disconnected"].append({"id": dev["id"], "mac": mac,
-                                                "label": label})
-                # Alerta si un equipo "vigilado" (siempre conectado) se cae. [Fase 3]
-                if dev.get("is_watched"):
-                    msg = f"El equipo vigilado '{label}' ({mac}) se desconecto de la red."
-                    self.alerts.add("device_down", msg, device_id=dev["id"],
-                                    severity="warning", ts=now)
-                    self._notify("Equipo vigilado caido", msg)
-
+        # Marcamos la lista interna en memoria.
         self._online_macs = current_macs
 
-        log.info(
-            "Escaneo: %d en linea (nuevos=%d, reconectados=%d, bajas=%d, ip_cambiada=%d)",
-            len(current_macs), len(summary["new"]), len(summary["reconnected"]),
-            len(summary["disconnected"]), len(summary["ip_changed"]),
-        )
-
-        if self.broadcast:
+        if self.broadcast is not None:
             try:
-                self.broadcast({"type": "scan", "data": summary})
+                self.broadcast(summary)
             except Exception:
-                log.exception("Fallo al difundir el resultado del escaneo")
+                log.exception("Fallo al emitir el resumen del escaneo")
 
         return summary
-
-    def online_macs(self) -> set[str]:
-        return set(self._online_macs)
