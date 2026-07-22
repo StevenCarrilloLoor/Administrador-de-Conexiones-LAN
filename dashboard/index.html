@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark light" />
+  <title>Administrador de Conexiones LAN</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%B0%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🛰️</span>
+      <div>
+        <h1>Administrador de Conexiones LAN</h1>
+        <span class="subtitle">Fase 1 · Descubrimiento e inventario</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div id="conn-indicator" class="conn-indicator" title="Estado del stream en vivo">
+        <span class="dot"></span><span class="conn-label">conectando…</span>
+      </div>
+      <button id="scan-btn" class="btn btn-primary">
+        <span class="scan-ico">⟳</span> Escanear ahora
+      </button>
+    </div>
+  </header>
+
+  <!-- Banner de capacidades / requisitos (Npcap, admin) -->
+  <div id="cap-banner" class="banner hidden"></div>
+  <!-- Banner de exposicion / autenticacion -->
+  <div id="auth-banner" class="banner banner-warn hidden"></div>
+
+  <!-- Tarjetas de resumen -->
+  <section class="stats-row" id="stats-row">
+    <div class="stat-card"><div class="stat-value" id="stat-online">–</div><div class="stat-label">En línea</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-total">–</div><div class="stat-label">Inventario</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-new">–</div><div class="stat-label">Nuevos (24 h)</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-alerts">–</div><div class="stat-label">Alertas sin leer</div></div>
+    <div class="stat-card stat-scan"><div class="stat-value" id="stat-lastscan">–</div><div class="stat-label">Último escaneo</div></div>
+  </section>
+
+  <main class="layout">
+    <section class="col-main">
+      <div class="toolbar">
+        <div class="search-wrap">
+          <span class="search-ico">🔎</span>
+          <input id="search" type="search" placeholder="Buscar por IP, MAC, nombre, fabricante o grupo…" autocomplete="off" />
+        </div>
+        <div class="filters">
+          <label class="chk"><input type="checkbox" id="filter-online" /> Solo en línea</label>
+          <select id="group-filter"><option value="">Todos los grupos</option></select>
+        </div>
+      </div>
+
+      <div id="device-list" class="device-list"><!-- tarjetas por JS --></div>
+      <div id="empty-state" class="empty-state hidden">
+        <p>No hay dispositivos en el inventario todavía.</p>
+        <p class="muted">Ejecuta un escaneo. Si el botón no encuentra nada, revisa Npcap, los privilegios de administrador y tu conexión a la LAN.</p>
+      </div>
+    </section>
+
+    <aside class="col-side">
+      <div class="panel">
+        <h2>Distribución por fabricante</h2>
+        <div class="chart-wrap"><canvas id="vendor-chart"></canvas></div>
+        <p id="chart-fallback" class="muted small hidden">Gráfica no disponible sin conexión (Chart.js). El resto del panel funciona igual.</p>
+      </div>
+
+      <div class="panel">
+        <h2>Alertas recientes <span id="alert-count" class="pill">0</span></h2>
+        <div id="alert-list" class="alert-list"><p class="muted small">Sin alertas.</p></div>
+      </div>
+
+      <div class="panel panel-muted">
+        <h2>Limitaciones técnicas</h2>
+        <ul id="limitations" class="limitations"><!-- por JS --></ul>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <span>Fase 1 · <a href="/docs" target="_blank" rel="noopener">API (OpenAPI)</a> · <a href="/api/status" target="_blank" rel="noopener">estado</a></span>
+    <span class="muted">Uso exclusivo en redes propias o administradas con autorización.</span>
+  </footer>
+
+  <!-- Modal de edición -->
+  <div id="edit-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Editar dispositivo</h3>
+      <div class="modal-meta" id="edit-meta"></div>
+      <label>Nombre personalizado
+        <input id="edit-name" type="text" maxlength="120" placeholder="p. ej. Notebook de Juan" />
+      </label>
+      <label>Grupo
+        <input id="edit-group" type="text" maxlength="60" placeholder="p. ej. IoT, familia, invitados" list="group-suggestions" />
+        <datalist id="group-suggestions"></datalist>
+      </label>
+      <div class="modal-actions">
+        <button id="edit-cancel" class="btn">Cancelar</button>
+        <button id="edit-save" class="btn btn-primary">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Chart.js: primero local (offline), si no CDN; la app degrada si falta -->
+  <script>
+    window.__loadChart = function (cb) {
+      var local = document.createElement('script');
+      local.src = 'vendor/chart.umd.min.js';
+      local.onload = function () { cb(true); };
+      local.onerror = function () {
+        var cdn = document.createElement('script');
+        cdn.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+        cdn.onload = function () { cb(true); };
+        cdn.onerror = function () { cb(false); };
+        document.head.appendChild(cdn);
+      };
+      document.head.appendChild(local);
+    };
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>

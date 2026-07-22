@@ -1,0 +1,28 @@
+# Entorno virtual
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Base de datos y runtime (se generan al ejecutar)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/verify_tmp.db*
+logs/*.log
+logs/*.log.*
+
+# Config local (usar config.example.ini como plantilla)
+config.ini
+
+# Chart.js descargado localmente (opcional, se re-descarga en setup)
+dashboard/vendor/chart.umd.min.js
+
+# SO / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/

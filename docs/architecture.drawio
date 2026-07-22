@@ -1,0 +1,72 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram name="Arquitectura Fase 1" id="lanmgr-arch">
+    <mxGraphModel dx="920" dy="560" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="920" pageHeight="560" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Administrador de Conexiones LAN — Arquitectura (Fase 1)" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="30" y="20" width="700" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="browser" value="Navegador&#10;(PC local o celular / laptop en la LAN)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8effb;strokeColor=#a9c2e8;" vertex="1" parent="1">
+          <mxGeometry x="330" y="86" width="260" height="58" as="geometry" />
+        </mxCell>
+
+        <mxCell id="proc" value="Proceso agente (Python 3.11, con privilegios de administrador)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fillColor=#ffffff;strokeColor=#c4cede;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="188" width="800" height="300" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fastapi" value="FastAPI + Uvicorn&#10;API REST · WebSocket /ws/live · sirve el dashboard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ef;strokeColor=#9edcb8;" vertex="1" parent="1">
+          <mxGeometry x="90" y="228" width="300" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dashboard" value="Dashboard (HTML/JS/CSS)&#10;responsive · buscador · tiempo real" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef1f7;strokeColor=#c4cede;" vertex="1" parent="1">
+          <mxGeometry x="90" y="330" width="300" height="64" as="geometry" />
+        </mxCell>
+
+        <mxCell id="scanner" value="ScannerService (APScheduler)&#10;escaneo periódico · diff altas/bajas · eventos + alertas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff5e6;strokeColor=#f0cf95;" vertex="1" parent="1">
+          <mxGeometry x="530" y="228" width="300" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="discovery" value="Descubrimiento (scapy / ARP)&#10;hostname · OUI IEEE · tipo inferido" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdeef0;strokeColor=#efb9c0;" vertex="1" parent="1">
+          <mxGeometry x="530" y="330" width="300" height="64" as="geometry" />
+        </mxCell>
+
+        <mxCell id="repos" value="Repositorios (capa de datos)&#10;devices · events · rules · alerts · settings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef1f7;strokeColor=#c4cede;" vertex="1" parent="1">
+          <mxGeometry x="310" y="418" width="300" height="52" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sqlite" value="SQLite (data/lanmanager.db)&#10;inventario · historial · reglas · alertas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8effb;strokeColor=#a9c2e8;" vertex="1" parent="1">
+          <mxGeometry x="90" y="500" width="300" height="44" as="geometry" />
+        </mxCell>
+
+        <mxCell id="npcap" value="Npcap (driver de captura)&#10;requerido en Windows para ARP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0eafb;strokeColor=#c9b8ec;" vertex="1" parent="1">
+          <mxGeometry x="530" y="500" width="300" height="44" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" value="HTTP REST + WebSocket" style="endArrow=classic;html=1;strokeColor=#5b6b86;fontColor=#5b6b86;" edge="1" parent="1" source="browser" target="fastapi">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="arranca" style="endArrow=classic;html=1;strokeColor=#5b6b86;fontColor=#5b6b86;" edge="1" parent="1" source="fastapi" target="scanner">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="" style="endArrow=classic;html=1;strokeColor=#5b6b86;" edge="1" parent="1" source="fastapi" target="dashboard">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="" style="endArrow=classic;html=1;strokeColor=#5b6b86;" edge="1" parent="1" source="scanner" target="discovery">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="" style="endArrow=classic;html=1;strokeColor=#5b6b86;" edge="1" parent="1" source="discovery" target="repos">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="" style="endArrow=classic;html=1;strokeColor=#5b6b86;" edge="1" parent="1" source="repos" target="sqlite">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="captura L2" style="endArrow=classic;html=1;strokeColor=#5b6b86;fontColor=#5b6b86;" edge="1" parent="1" source="discovery" target="npcap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
