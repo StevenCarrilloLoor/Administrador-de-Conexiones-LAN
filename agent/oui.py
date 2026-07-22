@@ -8,10 +8,17 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 from pathlib import Path
 from typing import Optional
 
-_OUI_CSV = Path(__file__).resolve().parents[1] / "data" / "oui.csv"
+# apppaths es un modulo de nivel raiz; garantizar que la raiz este en sys.path.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+import apppaths  # noqa: E402
+
+_OUI_CSV = apppaths.oui_csv_path()
 
 _HEX_RE = re.compile(r"[0-9A-Fa-f]")
 

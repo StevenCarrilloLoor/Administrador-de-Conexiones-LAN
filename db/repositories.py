@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from .database import Database
@@ -198,6 +198,13 @@ class ConnectionEventRepository:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def prune_older_than(self, days: int) -> int:
+        """Borra eventos con antiguedad mayor a `days` dias. Devuelve filas borradas. [M2]"""
+        cutoff = iso(utcnow() - timedelta(days=max(1, days)))
+        with self.db.connect() as c:
+            cur = c.execute("DELETE FROM connection_events WHERE timestamp < ?", (cutoff,))
+            return cur.rowcount
+
 
 class AlertRepository:
     def __init__(self, db: Database):
@@ -230,6 +237,15 @@ class AlertRepository:
         with self.db.connect() as c:
             return int(c.execute("SELECT COUNT(*) FROM alerts WHERE acknowledged = 0").fetchone()[0])
 
+    def prune_older_than(self, days: int) -> int:
+        """Borra alertas YA VISTAS con antiguedad mayor a `days` dias (conserva las no
+        leidas sin importar su edad, para no perder avisos). Devuelve filas borradas. [M2]"""
+        cutoff = iso(utcnow() - timedelta(days=max(1, days)))
+        with self.db.connect() as c:
+            cur = c.execute(
+                "DELETE FROM alerts WHERE acknowledged = 1 AND timestamp < ?", (cutoff,))
+            return cur.rowcount
+
 
 class RuleRepository:
     def __init__(self, db: Database):
@@ -260,6 +276,12 @@ class RuleRepository:
         q += " ORDER BY created_at DESC"
         with self.db.connect() as c:
             return [dict(r) for r in c.execute(q).fetchall()]
+
+    def get(self, rule_id: int) -> Optional[dict]:
+        with self.db.connect() as c:
+            return row_to_dict(
+                c.execute("SELECT * FROM rules WHERE id = ?", (rule_id,)).fetchone()
+            )
 
     def delete(self, rule_id: int) -> bool:
         with self.db.connect() as c:

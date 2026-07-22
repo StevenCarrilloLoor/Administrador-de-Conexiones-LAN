@@ -39,11 +39,13 @@ class ScannerService:
         interval_seconds: int = 30,
         broadcast: Optional[BroadcastFn] = None,
         scan_timeout: float = 3.0,
+        retention_days: int = 30,
     ):
         self.db = db
         self.interval = max(5, int(interval_seconds))
         self.broadcast = broadcast
         self.scan_timeout = scan_timeout
+        self.retention_days = max(1, int(retention_days))
 
         self.devices = DeviceRepository(db)
         self.events = ConnectionEventRepository(db)
@@ -66,8 +68,28 @@ class ScannerService:
             id="periodic_scan", max_instances=1, coalesce=True,
             next_run_time=datetime.now(timezone.utc),
         )
+        # Retencion: purga diaria de historial viejo + VACUUM. [M2]
+        self._scheduler.add_job(
+            self.prune_now, "interval", hours=24,
+            id="retention_prune", max_instances=1, coalesce=True,
+        )
         self._scheduler.start()
-        log.info("ScannerService iniciado (intervalo=%ss)", self.interval)
+        log.info("ScannerService iniciado (intervalo=%ss, retencion=%sd)",
+                 self.interval, self.retention_days)
+
+    def prune_now(self) -> dict:
+        """Purga eventos/alertas mas viejos que retention_days y compacta la BD. [M2]"""
+        try:
+            ev = self.events.prune_older_than(self.retention_days)
+            al = self.alerts.prune_older_than(self.retention_days)
+            if ev or al:
+                self.db.vacuum()
+            log.info("Retencion: %d eventos y %d alertas purgados (> %sd)",
+                     ev, al, self.retention_days)
+            return {"events_pruned": ev, "alerts_pruned": al}
+        except Exception as exc:
+            log.exception("Fallo en la purga de retencion: %s", exc)
+            return {"error": str(exc)}
 
     def stop(self) -> None:
         if self._scheduler is not None:

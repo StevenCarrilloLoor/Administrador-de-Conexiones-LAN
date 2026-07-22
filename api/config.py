@@ -1,17 +1,24 @@
 """Configuracion de la aplicacion.
 
 Prioridad: variables de entorno (LANMGR_*) > config.ini > valores por defecto.
-Las rutas se anclan a la raiz del proyecto para funcionar sin importar el CWD.
+Las rutas se resuelven via apppaths para funcionar igual como codigo fuente
+(`python main.py`) y como ejecutable empaquetado (AdministradorLAN.exe).
 """
 from __future__ import annotations
 
 import configparser
 import os
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-CONFIG_FILE = ROOT / "config.ini"
+# apppaths es un modulo de nivel raiz; garantizar que la raiz este en sys.path.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+import apppaths  # noqa: E402
+
+CONFIG_FILE = apppaths.config_file()
 
 
 def _get(cfg, section, key, fallback):
@@ -31,9 +38,10 @@ class Config:
     online_ttl: int = 90
     scan_timeout: float = 3.0
     auto_scan: bool = True
-    db_path: str = str(ROOT / "data" / "lanmanager.db")
-    log_dir: str = str(ROOT / "logs")
-    dashboard_dir: str = str(ROOT / "dashboard")
+    retention_days: int = 30
+    db_path: str = field(default_factory=lambda: str(apppaths.db_path()))
+    log_dir: str = field(default_factory=lambda: str(apppaths.log_dir()))
+    dashboard_dir: str = field(default_factory=lambda: str(apppaths.dashboard_dir()))
 
     @classmethod
     def load(cls) -> "Config":
@@ -54,9 +62,10 @@ class Config:
             online_ttl=int(_get(cfg, "scan", "online_ttl", 90)),
             scan_timeout=float(_get(cfg, "scan", "timeout", 3.0)),
             auto_scan=as_bool(_get(cfg, "scan", "auto_scan", "true")),
-            db_path=_get(cfg, "server", "db_path", str(ROOT / "data" / "lanmanager.db")),
-            log_dir=_get(cfg, "server", "log_dir", str(ROOT / "logs")),
-            dashboard_dir=str(ROOT / "dashboard"),
+            retention_days=int(_get(cfg, "scan", "retention_days", 30)),
+            db_path=_get(cfg, "server", "db_path", str(apppaths.db_path())),
+            log_dir=_get(cfg, "server", "log_dir", str(apppaths.log_dir())),
+            dashboard_dir=str(apppaths.dashboard_dir()),
         )
 
     @property

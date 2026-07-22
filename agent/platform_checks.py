@@ -90,26 +90,34 @@ def check_capabilities() -> Capabilities:
             "(marca la opcion 'WinPcap API-compatible Mode'). Sin Npcap no se puede "
             "escanear ni controlar la red en Windows."
         )
-    if not admin:
-        if win:
-            messages.append(
-                "El proceso NO tiene privilegios de administrador. El escaneo ARP y "
-                "el control activo requieren ejecutar como administrador "
-                "(clic derecho -> 'Ejecutar como administrador')."
-            )
-        else:
-            messages.append(
-                "El proceso no corre como root; el escaneo ARP crudo puede fallar. "
-                "Ejecuta con privilegios elevados (sudo)."
-            )
     if not layer2 and (npcap or not win):
         messages.append(
             "scapy no pudo inicializar la captura de capa 2. Revisa Npcap/permisos."
         )
 
-    can_scan = layer2 and (npcap or not win) and admin
-    if can_scan and not messages:
-        messages.append("Todos los requisitos presentes: listo para escanear.")
+    # El escaneo ARP requiere Npcap (en Windows) + captura de capa 2. Los privilegios de
+    # administrador NO son estrictamente necesarios para escanear cuando Npcap esta en modo
+    # compatible (verificado en la practica), pero SI para el control activo (bloqueo/limite,
+    # Fase 2). Por eso 'admin' es advertencia, no bloqueo del escaneo.
+    can_scan = layer2 and (npcap or not win)
+
+    if not admin:
+        if win:
+            messages.append(
+                "Sin privilegios de administrador: el escaneo suele funcionar con Npcap, "
+                "pero el control activo (bloqueo/limite de la Fase 2) SI requiere ejecutar "
+                "como administrador (clic derecho -> 'Ejecutar como administrador')."
+            )
+        else:
+            messages.append(
+                "Sin privilegios de root: el escaneo ARP crudo puede fallar; el control "
+                "activo requiere privilegios elevados (sudo)."
+            )
+
+    if can_scan:
+        head = ("Requisitos presentes: listo para escanear y controlar."
+                if admin else "Listo para escanear (Npcap presente).")
+        messages.insert(0, head)
 
     return Capabilities(
         platform=platform.platform(),

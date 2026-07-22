@@ -1,0 +1,4 @@
+# Dependencias SOLO para empaquetar el .exe (no las necesita la app en ejecucion)
+pyinstaller>=6.6,<7.0
+pystray>=0.19,<1.0
+pillow>=10.0

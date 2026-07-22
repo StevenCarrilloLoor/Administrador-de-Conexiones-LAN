@@ -7,18 +7,31 @@ que es exactamente el patron de esta aplicacion.
 from __future__ import annotations
 
 import sqlite3
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_PATH = Path(__file__).with_name("schema.sql")
-_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# apppaths es un modulo de nivel raiz; garantizar que la raiz este en sys.path.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+import apppaths  # noqa: E402
+
+# schema.sql se resuelve via apppaths para funcionar tambien empaquetado (PyInstaller).
+SCHEMA_PATH = apppaths.resource_path("db", "schema.sql")
+
+# Versionado de esquema (M1). La version base (schema.sql) es la 1. Las futuras
+# migraciones incrementales van en MIGRATIONS: {version: "SQL"} y se aplican en orden
+# a las BD existentes. Se usa PRAGMA user_version para registrar el estado.
+BASE_SCHEMA_VERSION = 1
+MIGRATIONS: dict[int, str] = {
+    # 2: "ALTER TABLE devices ADD COLUMN notes TEXT;",
+}
 
 
 def default_db_path() -> Path:
-    data_dir = _PROJECT_ROOT / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir / "lanmanager.db"
+    return apppaths.db_path()
 
 
 class Database:
@@ -43,10 +56,27 @@ class Database:
             conn.close()
 
     def init(self) -> None:
-        """Crea el esquema si no existe (idempotente)."""
-        sql = SCHEMA_PATH.read_text(encoding="utf-8")
+        """Inicializa/migra el esquema (idempotente y versionado). [M1]
+
+        - BD nueva (user_version=0): aplica schema.sql base y marca version 1.
+        - BD existente: aplica las migraciones incrementales pendientes en orden.
+        schema.sql usa CREATE TABLE IF NOT EXISTS, asi que re-ejecutarlo es seguro.
+        """
         with self.connect() as conn:
-            conn.executescript(sql)
+            current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if current == 0:
+                conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+                conn.execute(f"PRAGMA user_version = {BASE_SCHEMA_VERSION}")
+                current = BASE_SCHEMA_VERSION
+            for version in sorted(MIGRATIONS):
+                if version > current:
+                    conn.executescript(MIGRATIONS[version])
+                    conn.execute(f"PRAGMA user_version = {version}")
+                    current = version
+
+    def schema_version(self) -> int:
+        with self.connect() as conn:
+            return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
     def vacuum(self) -> None:
         with self.connect() as conn:

@@ -38,8 +38,8 @@ class DeviceDetailOut(DeviceOut):
 
 
 class DeviceUpdateIn(BaseModel):
-    custom_name: Optional[str] = None
-    device_group: Optional[str] = None
+    custom_name: Optional[str] = Field(default=None, max_length=120)
+    device_group: Optional[str] = Field(default=None, max_length=60)
 
 
 class BlockIn(BaseModel):
@@ -85,10 +85,14 @@ class RuleIn(BaseModel):
 
 
 class ScanResult(BaseModel):
-    online_count: int
+    online_count: int = 0
     new: list = Field(default_factory=list)
     reconnected: list = Field(default_factory=list)
     disconnected: list = Field(default_factory=list)
     ip_changed: list = Field(default_factory=list)
     scanned_subnets: list = Field(default_factory=list)
     timestamp: Optional[str] = None
+    # Estados alternativos que puede devolver scan_once (M9)
+    skipped: bool = False
+    reason: Optional[str] = None
+    error: Optional[str] = None

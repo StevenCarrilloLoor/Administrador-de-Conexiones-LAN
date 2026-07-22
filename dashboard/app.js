@@ -97,12 +97,19 @@ function renderStatus() {
   if (!st) return;
   const caps = st.capabilities;
 
-  // Banner de capacidades (solo si no puede escanear o hay mensajes relevantes)
+  // Banner de capacidades: rojo si no puede escanear; ámbar si escanea pero sin admin
+  // (el control activo de la Fase 2 requerirá administrador).
   const banner = $("#cap-banner");
   if (!caps.can_scan) {
     banner.className = "banner banner-error";
     banner.innerHTML = "<b>⚠ Requisitos incompletos para escanear.</b><ul>" +
       caps.messages.map((m) => `<li>${esc(m)}</li>`).join("") + "</ul>";
+    banner.classList.remove("hidden");
+  } else if (caps.is_admin === false) {
+    banner.className = "banner banner-warn";
+    banner.innerHTML = "<b>Escaneo activo.</b> Estás sin privilegios de administrador: " +
+      "el inventario funciona, pero el control activo (bloqueo/límite, Fase 2) requerirá " +
+      "ejecutar como administrador.";
     banner.classList.remove("hidden");
   } else {
     banner.classList.add("hidden");
@@ -156,7 +163,19 @@ function renderDevices() {
     return ipSortKey(a.ip) - ipSortKey(b.ip);
   });
 
-  $("#empty-state").classList.toggle("hidden", state.devices.length !== 0);
+  // Estado vacio: distingue "sin inventario" de "sin resultados para el filtro". [M10]
+  const es = $("#empty-state");
+  if (state.devices.length === 0) {
+    es.innerHTML = '<p>No hay dispositivos en el inventario todavía.</p>' +
+      '<p class="muted">Ejecutá un escaneo. Si no encuentra nada, revisá Npcap y tu conexión a la LAN.</p>';
+    es.classList.remove("hidden");
+  } else if (shown.length === 0) {
+    es.innerHTML = '<p>Sin resultados para el filtro actual.</p>' +
+      '<p class="muted">Probá con otro texto de búsqueda, grupo, o quitá el filtro “solo en línea”.</p>';
+    es.classList.remove("hidden");
+  } else {
+    es.classList.add("hidden");
+  }
   list.innerHTML = shown.map(renderDeviceCard).join("");
   $$(".edit-btn").forEach((b) => b.addEventListener("click", () => openEdit(Number(b.dataset.id))));
 }
@@ -275,7 +294,7 @@ async function doScan() {
   const btn = $("#scan-btn");
   btn.disabled = true; btn.classList.add("scanning");
   try {
-    const r = await api("/api/network/scan");
+    const r = await api("/api/network/scan", { method: "POST" }); // [B2] ahora es POST
     if (r && r.error) toast("Escaneo con error: " + r.error, "bad");
     else if (r && r.skipped) toast("Ya hay un escaneo en curso…", "warn");
     else {

@@ -1,5 +1,7 @@
 # Administrador de Conexiones LAN
 
+[![tests](https://github.com/StevenCarrilloLoor/Administrador-de-Conexiones-LAN/actions/workflows/tests.yml/badge.svg)](https://github.com/StevenCarrilloLoor/Administrador-de-Conexiones-LAN/actions/workflows/tests.yml)
+
 **Aplicación de administración de conexiones para una red local (Windows).**
 Arquitectura de *agente + dashboard web*: un proceso nativo descubre y (en fases
 siguientes) controla los dispositivos de tu red, y sirve un panel web accesible
@@ -256,7 +258,24 @@ auditables, con marca de tiempo).
 Para que el agente inicie con el sistema, crea una tarea en el **Programador de
 tareas** de Windows que ejecute `run_server.bat` "con los privilegios más altos" al
 iniciar sesión. (El ícono de bandeja y el empaquetado como servicio forman parte del
-*empaquetado final*, previsto para más adelante.)
+*empaquetado final*, ya disponible como `AdministradorLAN.exe`.)
+
+---
+
+## 12.bis Tests y CI
+
+La suite de tests (pytest) cubre la API, los repositorios/BD, el versionado de
+esquema, la resolución de fabricante por OUI, la inferencia de tipo, el servicio de
+escaneo (con la red mockeada) y el bootstrap de Npcap. No requiere Npcap ni una LAN
+real, así que corre en cualquier sistema y en CI.
+
+```
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -q
+```
+
+Cada `push` y cada `pull request` disparan el workflow de **GitHub Actions**
+(`.github/workflows/tests.yml`), que corre la suite en Python 3.11, 3.12 y 3.13.
 
 ---
 

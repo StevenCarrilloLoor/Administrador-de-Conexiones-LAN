@@ -10,8 +10,8 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from agent.oui import shared_lookup
 from agent.platform_checks import check_capabilities
@@ -69,9 +69,9 @@ def create_app(config: Config | None = None) -> FastAPI:
         description="Descubrimiento e inventario de dispositivos en la red local (Fase 1).",
         lifespan=lifespan,
     )
-    app.add_middleware(
-        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
-    )
+    # Sin CORS: el dashboard se sirve desde el MISMO origen que la API (app.mount("/")),
+    # asi que no se necesita CORS. No habilitar comodin cross-origin en un servicio local
+    # sin autenticacion (evita que cualquier web lea/modifique el inventario). [B1]
 
     # Estado compartido
     st = app.state
@@ -87,6 +87,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     st.scanner = ScannerService(
         db, interval_seconds=cfg.scan_interval,
         broadcast=st.ws.broadcast_threadsafe, scan_timeout=cfg.scan_timeout,
+        retention_days=cfg.retention_days,
     )
 
     for msg in st.capabilities.messages:
@@ -135,10 +136,11 @@ def create_app(config: Config | None = None) -> FastAPI:
     async def ws_live(ws: WebSocket):
         await st.ws.connect(ws)
         try:
-            # Enviar estado inicial al conectar
+            # Estado inicial al conectar. La lectura SQLite (bloqueante) va a un
+            # threadpool para no bloquear el event loop. [M4]
+            rows = await run_in_threadpool(st.device_repo.all)
             await ws.send_json({"type": "hello", "data": {
-                "devices": [devices_router.to_device_out(r, cfg.online_ttl)
-                            for r in st.device_repo.all()],
+                "devices": [devices_router.to_device_out(r, cfg.online_ttl) for r in rows],
                 "scanner": st.scanner.status,
             }})
             while True:

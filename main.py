@@ -39,11 +39,13 @@ def main() -> int:
     cfg = Config.load()
     caps = check_capabilities()
 
+    # 0.0.0.0 no es direccionable por el navegador: mostrar localhost. [M11]
+    shown_host = "localhost" if cfg.host in ("0.0.0.0", "::", "") else cfg.host
     print("=" * 70)
     print("  Administrador de Conexiones LAN — Fase 1")
     print("=" * 70)
-    print(f"  Dashboard:  http://{'localhost' if not cfg.exposed_on_lan else cfg.host}:{cfg.port}/")
-    print(f"  API:        http://{'localhost' if not cfg.exposed_on_lan else cfg.host}:{cfg.port}/api/status")
+    print(f"  Dashboard:  http://{shown_host}:{cfg.port}/")
+    print(f"  API:        http://{shown_host}:{cfg.port}/api/status")
     print(f"  Admin: {'SI' if caps.is_admin else 'NO'}   Npcap: {'SI' if caps.npcap else 'NO'}"
           f"   Puede escanear: {'SI' if caps.can_scan else 'NO'}")
     if not caps.can_scan:

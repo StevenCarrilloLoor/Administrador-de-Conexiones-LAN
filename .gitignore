@@ -6,6 +6,13 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Empaquetado (PyInstaller)
+build/
+dist/
 
 # Base de datos y runtime (se generan al ejecutar)
 data/*.db
@@ -14,12 +21,10 @@ data/*.db-shm
 data/verify_tmp.db*
 logs/*.log
 logs/*.log.*
+logs/*.txt
 
 # Config local (usar config.example.ini como plantilla)
 config.ini
-
-# Chart.js descargado localmente (opcional, se re-descarga en setup)
-dashboard/vendor/chart.umd.min.js
 
 # SO / editor
 Thumbs.db
